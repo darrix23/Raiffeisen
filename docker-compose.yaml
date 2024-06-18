@@ -1,0 +1,150 @@
+version: '3'
+x-airflow-common: &airflow-common
+  environment:
+    &airflow-common-env
+    AIRFLOW_CORE_EXECUTOR: CeleryExecutor
+    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+    AIRFLOW_CORE_FERNET_KEY: ''
+    AIRFLOW__CORE_DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW_CORE_LOAD_EXAMPLES: 'false'
+    AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: 5
+    _AIRFLOW_DB_MIGRATE: 'true'
+    _AIRFLOW_WWW_USER_CREATE: 'true'
+    _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
+    _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
+volumes:
+  postgres-db-volume:
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    ports:
+      - "5432:5432"
+    restart: always
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "airflow" ]
+      interval: 5s
+      retries: 5
+    networks:  # Добавляем сеть для PostgreSQL
+      - airflow_network
+
+  clickhouse:
+    image: yandex/clickhouse-server:latest
+    environment:
+      CLICKHOUSE_USER: airflow
+      CLICKHOUSE_PASSWORD: airflow
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - ./clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse_logs:/var/log/clickhouse-server
+    networks:  # Добавляем сеть для ClickHouse
+      - airflow_network
+
+  af-webserver:
+    <<: *airflow-common
+    build:
+      context: ./airflow_docker_image
+      dockerfile: Dockerfile
+    container_name: af-webserver
+    environment:
+      *airflow-common-env
+    command: webserver
+    ports:
+      - "8080:8080"
+    restart: always
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - /c/Users/1/Desktop/bind_mount:/opt/airflow/host_directory
+    networks:  # Добавляем сеть для Airflow webserver
+      - airflow_network
+
+  af-scheduler:
+    <<: *airflow-common
+    build:
+      context: ./airflow_docker_image
+      dockerfile: Dockerfile
+    container_name: af-scheduler
+    environment:
+      *airflow-common-env
+    command: scheduler
+    restart: always
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - /c/Users/1/Desktop/bind_mount:/opt/airflow/host_directory
+    networks:  # Добавляем сеть для Airflow scheduler
+      - airflow_network
+
+  af-worker:
+    <<: *airflow-common
+    build:
+      context: ./airflow_docker_image
+      dockerfile: Dockerfile
+    container_name: af-worker
+    environment:
+      *airflow-common-env
+    command: version
+    restart: always
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - /c/Users/1/Desktop/bind_mount:/opt/airflow/host_directory
+    networks:  # Добавляем сеть для Airflow worker
+      - airflow_network
+
+  airflow-init:
+    <<: *airflow-common
+    build:
+      context: ./airflow_docker_image
+      dockerfile: Dockerfile
+    container_name: airflow-init
+    command: version
+    environment:
+      <<: *airflow-common-env
+    networks:  # Добавляем сеть для инициализации Airflow
+      - airflow_network
+
+  metabase:
+    image: metabase/metabase
+    ports:
+      - 3333:3000
+    restart: unless-stopped
+    networks:  # Добавляем сеть для Metabase
+      - airflow_network
+
+  jupyter:
+    image: quay.io/jupyter/datascience-notebook:2024-05-27
+    container_name: my_spark
+    ports:
+      - "10000:8888"
+    volumes:
+      - ./dags:/home/jovyan/work
+    restart: always
+    networks:  # Добавляем сеть для Jupyter
+      - airflow_network
+
+  grafana:
+    image: grafana/grafana
+    container_name: my_grafana
+    ports:
+      - "3000:3000"
+    restart: always
+    networks:
+      - airflow_network
+
+networks:  # Определение общей сети для всех сервисов
+  airflow_network:
+    driver: bridge
