@@ -1,8 +1,8 @@
 from airflow import DAG
 from airflow.operators.python_operator import PythonOperator
 from airflow.operators.dummy import DummyOperator
+from airflow.sensors.sql import SqlSensor
 from datetime import datetime
-
 from etl_package.etl import extract_data_from_postgres, transform_data, load_data_into_clickhouse
 
 default_args = {
@@ -24,6 +24,20 @@ with DAG(
 
     start = DummyOperator(task_id='start')
 
+    # Сенсор для проверки обновления таблицы
+    check_update_sensor = SqlSensor(
+        task_id='check_table_update',
+        conn_id='postgres_default',
+        sql="""
+        SELECT 1
+        FROM sleep.raw_sleep
+        WHERE last_updated >= NOW() - INTERVAL '3 minutes';
+        """,
+        mode='poke',
+        timeout=300,
+        poke_interval=20
+    )
+
     extract = PythonOperator(
         task_id='extract_data_from_postgres',
         python_callable=extract_data_from_postgres
@@ -38,11 +52,9 @@ with DAG(
             task_id=f'transform_data_{case}',
             python_callable=transform_data,
             op_args=[],
-            op_kwargs={'case': case,
-                       'df': df},  # Передаем конкретный случай для трансформации
+            op_kwargs={'case': case, 'df': df},  # Передаем конкретный случай для трансформации
         )
         transform_tasks.append(transform_task)
-        transform_tasks.append(transform_data)
 
         load_task = PythonOperator(
             task_id=f'load_data_into_clickhouse_{case}',
@@ -54,5 +66,6 @@ with DAG(
 
     end = DummyOperator(task_id='end')
 
-    start >> >> transform_tasks[0] >> load_tasks[0] >> end
-    start >> transform_tasks[1] >> load_tasks[1] >> end
+    start >> check_table_update
+    check_table_update >> transform_tasks[0] >> load_tasks[0] >> end
+    check_table_update >> transform_tasks[1] >> load_tasks[1] >> end
