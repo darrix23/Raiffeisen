@@ -26,10 +26,18 @@ def load_data_to_postgres():
             day = int(match.group(1))
             month = int(match.group(2))
             year = int(match.group(3))
-        cur.execute("""
-            INSERT INTO sleep.raw_sleep (date, up, down)
-            VALUES (%s, %s, %s)
-        """, (f'{month}.{day}.{year}', row._2, row._3))
+            date_str = f'{year}-{month:02d}-{day:02d}'
+            date = datetime.strptime(date_str, '%Y-%m-%d').date()
+
+            cur.execute("""
+                INSERT INTO sleep.raw_sleep (date, up, down)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (date) 
+                DO UPDATE SET
+                    up = EXCLUDED.up,
+                    down = EXCLUDED.down
+                WHERE sleep.raw_sleep.date = EXCLUDED.date
+            """, (date, row._2, row._3))
 
     conn.commit()
     cur.close()

@@ -17,7 +17,7 @@ default_args = {
 with DAG(
     'file_sensor_dag',
     default_args=default_args,
-    schedule_interval='*/1 * * * *',  # Каждые 2 минуты
+    schedule_interval='*/3 * * * *',  # Каждую минуту
     catchup=False,
     concurrency=1,         # Ограничиваем количество параллельно выполняемых задач
     max_active_runs=1,     # Ограничиваем количество активных экземпляров DAG
